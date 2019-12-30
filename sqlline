@@ -44,6 +44,7 @@ if [ "$cygwin" ]; then
 fi
 
 export JAVA_OPTS=-Djavax.xml.parsers.DocumentBuilderFactory=com.sun.org.apache.xerces.internal.jaxp.DocumentBuilderFactoryImpl
+export JAVA_OPTS="$JAVA_OPTS -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005"
 
 exec java -Xmx1g $VM_OPTS $JAVA_OPTS -jar build/libs/sqllineClasspath.jar "$@"
 
