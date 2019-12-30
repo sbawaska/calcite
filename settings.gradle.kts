@@ -55,6 +55,7 @@ include(
     "geode",
     "kafka",
     "linq4j",
+    "liiklus",
     "mongodb",
     "pig",
     "piglet",

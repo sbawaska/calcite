@@ -144,7 +144,7 @@ val javadocAggregate by tasks.registering(Javadoc::class) {
 }
 
 val adaptersForSqlline = listOf(
-    ":babel", ":cassandra", ":druid", ":elasticsearch", ":file", ":geode", ":kafka", ":mongodb",
+    ":babel", ":cassandra", ":druid", ":elasticsearch", ":file", ":geode", ":kafka", ":liiklus", ":mongodb",
     ":pig", ":piglet", ":plus", ":spark", ":splunk"
 )
 

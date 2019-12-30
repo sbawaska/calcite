@@ -9,6 +9,7 @@
 **/src/test/resources/bug/archers.json
 **/src/test/resources/foodmart-schema.spec
 **/src/test/resources/*.json
+*.json
 **/data.txt
 **/data2.txt
 #bu ildSrc/build
