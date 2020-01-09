@@ -46,6 +46,7 @@ plugins {
     id("com.github.vlsi.gradle-extensions")
     id("com.github.vlsi.license-gather") apply false
     id("com.github.vlsi.stage-vote-release")
+    id("com.google.protobuf") apply false version "0.8.8"
 }
 
 repositories {
