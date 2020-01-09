@@ -25,11 +25,11 @@ plugins {
 
 protobuf {
     protoc {
-        artifact = "com.google.protobuf:protoc:3.0.0"
+        artifact = "com.google.protobuf:protoc:3.11.0"
     }
     plugins {
         id("grpc") {
-            artifact = "io.grpc:protoc-gen-grpc-java:1.15.1"
+            artifact = "io.grpc:protoc-gen-grpc-java:1.26.0"
         }
     }
     generateProtoTasks {
@@ -40,10 +40,23 @@ protobuf {
         }
     }
 }
-
+sourceSets {
+    main {
+        java {
+            srcDirs("build/generated/source/proto/main/grpc")
+            srcDirs("build/generated/source/proto/main/java")
+            srcDirs("build/generated/source/janino")
+        }
+    }
+}
 dependencies {
     api(project(":core"))
     api(project(":linq4j"))
+    api("io.cloudevents:cloudevents-api:1.2.0")
+    implementation("com.google.protobuf:protobuf-gradle-plugin:0.8.0")
+    implementation("io.grpc:grpc-netty-shaded:1.26.0")
+    implementation("io.grpc:grpc-protobuf:1.26.0")
+    implementation("io.grpc:grpc-stub:1.26.0")
 
     testImplementation(project(":core", "testClasses"))
 }

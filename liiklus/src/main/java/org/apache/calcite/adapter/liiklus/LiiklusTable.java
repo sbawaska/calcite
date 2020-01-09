@@ -16,11 +16,17 @@
  */
 package org.apache.calcite.adapter.liiklus;
 
+import com.github.bsideup.liiklus.protocol.LiiklusServiceGrpc;
+import com.github.bsideup.liiklus.protocol.SubscribeRequest;
+import com.google.common.collect.ImmutableList;
+import io.grpc.ManagedChannel;
+import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import org.apache.calcite.DataContext;
 import org.apache.calcite.config.CalciteConnectionConfig;
 import org.apache.calcite.linq4j.AbstractEnumerable;
 import org.apache.calcite.linq4j.Enumerable;
 import org.apache.calcite.linq4j.Enumerator;
+import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.schema.*;
@@ -45,11 +51,18 @@ public class LiiklusTable implements ScannableTable, StreamableTable {
     final RelDataType mapType = typeFactory.createMapType(
       typeFactory.createSqlType(SqlTypeName.VARCHAR),
       typeFactory.createTypeWithNullability(typeFactory.createSqlType(SqlTypeName.ANY), true));
-    return typeFactory.builder().add("_MAP", mapType).build();
+    final RelDataTypeFactory.Builder fieldInfo = typeFactory.builder();
+    fieldInfo.add("ID", SqlTypeName.VARCHAR);
+    fieldInfo.add("SOURCE", SqlTypeName.VARCHAR);
+    fieldInfo.add("SPEC_VERSION", SqlTypeName.VARCHAR);
+    fieldInfo.add("TYPE", SqlTypeName.VARCHAR);
+    fieldInfo.add("DATA", mapType);
+    return fieldInfo.build();
   }
 
   @Override public Statistic getStatistic() {
-    return null;
+    return Statistics.of(100d, ImmutableList.of(),
+      RelCollations.createSingleton(0));
   }
 
   @Override public Schema.TableType getJdbcTableType() {
@@ -67,7 +80,15 @@ public class LiiklusTable implements ScannableTable, StreamableTable {
   @Override public Enumerable<Object[]> scan(DataContext root) {
     return new AbstractEnumerable<Object[]>() {
       @Override public Enumerator<Object[]> enumerator() {
-        return null;
+
+        ManagedChannel channel = NettyChannelBuilder.forTarget(tableOptions.getGatewayAddress())
+          .directExecutor()
+          .usePlaintext()
+          .build();
+
+        LiiklusServiceGrpc.LiiklusServiceStub stub = LiiklusServiceGrpc.newStub(channel);
+
+        return new CloudEventsMessageEnumerator(tableOptions, stub);
       }
     };
   }
