@@ -16,9 +16,13 @@
  */
 package org.apache.calcite.adapter.liiklus;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.bsideup.liiklus.protocol.LiiklusServiceGrpc;
 import com.github.bsideup.liiklus.protocol.SubscribeRequest;
 import com.google.common.collect.ImmutableList;
+import io.cloudevents.CloudEvent;
 import io.grpc.ManagedChannel;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
 import org.apache.calcite.DataContext;
@@ -34,13 +38,21 @@ import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.type.SqlTypeName;
 
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 
 public class LiiklusTable implements ScannableTable, StreamableTable {
 
   private LiiklusTableOptions tableOptions;
+  private LiiklusReader reader;
+  private ObjectMapper mapper = new ObjectMapper();
+  private Map<String, SqlTypeName> additionalColumns;
 
   public LiiklusTable(LiiklusTableOptions tableOptions) {
     this.tableOptions = tableOptions;
+    this.reader = new LiiklusReader(tableOptions);
   }
 
   @Override public Table stream() {
@@ -48,16 +60,54 @@ public class LiiklusTable implements ScannableTable, StreamableTable {
   }
 
   @Override public RelDataType getRowType(RelDataTypeFactory typeFactory) {
+    Map<String, SqlTypeName> additionalColumns = getDataColumns();
     final RelDataType mapType = typeFactory.createMapType(
       typeFactory.createSqlType(SqlTypeName.VARCHAR),
       typeFactory.createTypeWithNullability(typeFactory.createSqlType(SqlTypeName.ANY), true));
     final RelDataTypeFactory.Builder fieldInfo = typeFactory.builder();
-    fieldInfo.add("ID", SqlTypeName.VARCHAR);
+    fieldInfo.add("CE_ID", SqlTypeName.VARCHAR);
     fieldInfo.add("SOURCE", SqlTypeName.VARCHAR);
     fieldInfo.add("SPEC_VERSION", SqlTypeName.VARCHAR);
     fieldInfo.add("TYPE", SqlTypeName.VARCHAR);
-    fieldInfo.add("DATA", mapType);
+    for (String colName : additionalColumns.keySet()) {
+      fieldInfo.add(colName.toUpperCase(), additionalColumns.get(colName));
+    }
     return fieldInfo.build();
+  }
+
+  private Map<String, SqlTypeName> getDataColumns() {
+    if (this.additionalColumns != null) {
+      return this.additionalColumns;
+    }
+    Map<String, SqlTypeName> retVal = new LinkedHashMap<>();
+    try {
+      CloudEvent event = this.reader.readFirst();
+      String jsonString;
+      if (event.getData().isPresent()) {
+        jsonString = (String) event.getData().get();
+      } else {
+        jsonString = new String(event.getDataBase64());
+      }
+      Map<String, Object> data = mapper.readValue(jsonString, Map.class);
+      for (String k : data.keySet()) {
+        Object v = data.get(k);
+        SqlTypeName sqlType;
+        if (v instanceof Integer) {
+          sqlType = SqlTypeName.INTEGER;
+        } else {
+          sqlType = SqlTypeName.VARCHAR;
+        }
+        retVal.put(k, sqlType);
+      }
+    } catch (InterruptedException e) {
+      e.printStackTrace();
+    } catch (JsonMappingException e) {
+      e.printStackTrace();
+    } catch (JsonProcessingException e) {
+      e.printStackTrace();
+    }
+    this.additionalColumns = retVal;
+    return this.additionalColumns;
   }
 
   @Override public Statistic getStatistic() {
@@ -81,14 +131,7 @@ public class LiiklusTable implements ScannableTable, StreamableTable {
     return new AbstractEnumerable<Object[]>() {
       @Override public Enumerator<Object[]> enumerator() {
 
-        ManagedChannel channel = NettyChannelBuilder.forTarget(tableOptions.getGatewayAddress())
-          .directExecutor()
-          .usePlaintext()
-          .build();
-
-        LiiklusServiceGrpc.LiiklusServiceStub stub = LiiklusServiceGrpc.newStub(channel);
-
-        return new CloudEventsMessageEnumerator(tableOptions, stub);
+        return new CloudEventsMessageEnumerator(reader, additionalColumns);
       }
     };
   }

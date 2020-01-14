@@ -16,94 +16,27 @@
  */
 package org.apache.calcite.adapter.liiklus;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.github.bsideup.liiklus.protocol.*;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.cloudevents.CloudEvent;
-import io.cloudevents.json.Json;
-
-import io.cloudevents.v1.CloudEventImpl;
-import io.grpc.stub.StreamObserver;
 import org.apache.calcite.linq4j.Enumerator;
+import org.apache.calcite.sql.type.SqlTypeName;
 
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Arrays;
+import java.util.Map;
 
 public class CloudEventsMessageEnumerator implements Enumerator<Object[]> {
 
-  private LiiklusServiceGrpc.LiiklusServiceStub liiklusServiceStub;
-  private LiiklusTableOptions tableOptions;
-  private BlockingQueue<CloudEvent> q = new LinkedBlockingQueue<>();
-  private AtomicBoolean subscribed = new AtomicBoolean(false);
-  private Object[] current = new Object[5];
+  private LiiklusReader reader;
+  private Map<String, SqlTypeName> additionalColumns;
+  private Object[] current;
+  private ObjectMapper mapper = new ObjectMapper();
 
-  public CloudEventsMessageEnumerator(LiiklusTableOptions tableOptions, LiiklusServiceGrpc.LiiklusServiceStub stub) {
-    this.liiklusServiceStub = stub;
-    this.tableOptions = tableOptions;
-
-  }
-
-  private void subscribe() {
-    if (!subscribed.compareAndSet(false, true)) {
-      return;
-    }
-    SubscribeRequest subscribeAction = SubscribeRequest.newBuilder()
-      .setTopic(tableOptions.getTopicName())
-      .setGroup("my-group" + System.nanoTime())
-      .setAutoOffsetReset(SubscribeRequest.AutoOffsetReset.EARLIEST)
-      .build();
-
-    final BlockingQueue<Assignment> subscribeAssignment = new SynchronousQueue<>();
-    this.liiklusServiceStub.subscribe(subscribeAction, new StreamObserver<SubscribeReply>() {
-      @Override
-      public void onNext(SubscribeReply value) {
-        try {
-          subscribeAssignment.put(value.getAssignment());
-        } catch (InterruptedException e) {
-          e.printStackTrace();
-        }
-      }
-
-      @Override
-      public void onError(Throwable t) {
-        close();
-      }
-
-      @Override
-      public void onCompleted() {
-        close();
-      }
-    });
-
-    ReceiveRequest receiveRequest = null;
-    try {
-      receiveRequest = ReceiveRequest.newBuilder().setAssignment(subscribeAssignment.take()).build();
-    } catch (InterruptedException e) {
-      e.printStackTrace();
-    }
-
-    this.liiklusServiceStub.receive(receiveRequest, new StreamObserver<ReceiveReply>() {
-      @Override
-      public void onNext(ReceiveReply value) {
-        try {
-          String eventJson = new String(value.getRecord().getValue().toByteArray());
-          CloudEvent event = Json.decodeValue(eventJson, new TypeReference<CloudEventImpl>() {});
-          q.put(event);
-        } catch (InterruptedException e) {
-          e.printStackTrace();
-        }
-      }
-
-      @Override
-      public void onError(Throwable t) {
-        t.printStackTrace();
-      }
-
-      @Override
-      public void onCompleted() {
-      }
-    });
+  public CloudEventsMessageEnumerator(LiiklusReader reader, Map<String, SqlTypeName> additionalColumns) {
+    this.reader = reader;
+    this.additionalColumns = additionalColumns;
+    this.current = new Object[4 + additionalColumns.size()];
   }
 
   @Override public Object[] current() {
@@ -111,20 +44,31 @@ public class CloudEventsMessageEnumerator implements Enumerator<Object[]> {
   }
 
   @Override public boolean moveNext() {
-    subscribe();
+
     try {
-      CloudEvent event = q.take();
+      CloudEvent event = reader.read();
       current[0] = event.getAttributes().getId();
       current[1] = event.getAttributes().getSource();
       current[2] = event.getAttributes().getSpecversion();
       current[3] = event.getAttributes().getType();
+      String jsonString;
       if (event.getData().isPresent()) {
-        current[4] = event.getData().get();
+        jsonString= (String) event.getData().get();
       } else {
-        current[4] = new String(event.getDataBase64());
+        jsonString = new String(event.getDataBase64());
+      }
+      Map<String, Object> data = mapper.readValue(jsonString, Map.class);
+      int idx = 4;
+      for (String k : this.additionalColumns.keySet()) {
+        current[idx] = data.get(k);
+        idx++;
       }
       return true;
     } catch (InterruptedException e) {
+      e.printStackTrace();
+    } catch (JsonMappingException e) {
+      e.printStackTrace();
+    } catch (JsonProcessingException e) {
       e.printStackTrace();
     }
     return false;
